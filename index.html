@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark Bat Cave</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const DarkBatGame = () => {
+            const [batY, setBatY] = useState(250);
+            const [batVelocity, setBatVelocity] = useState(0);
+            const [obstacles, setObstacles] = useState([]);
+            const [coins, setCoins] = useState([]);
+            const [score, setScore] = useState(0);
+            const [totalCoins, setTotalCoins] = useState(0);
+            const [collectedCoins, setCollectedCoins] = useState(0);
+            const [gameStarted, setGameStarted] = useState(false);
+            const [gameOver, setGameOver] = useState(false);
+            const [glitchEffect, setGlitchEffect] = useState(false);
+            const [showShop, setShowShop] = useState(false);
+            const [selectedSkin, setSelectedSkin] = useState('default');
+            const [ownedSkins, setOwnedSkins] = useState(['default']);
+            const gameLoop = useRef(null);
+            const obstacleTimer = useRef(null);
+            const coinTimer = useRef(null);
+
+            const BAT_SIZE = 40;
+            const GRAVITY = 0.3;
+            const JUMP_STRENGTH = -6;
+            const OBSTACLE_WIDTH = 60;
+            const GAP_SIZE = 220;
+            const GAME_HEIGHT = 600;
+            const GAME_WIDTH = 400;
+
+            const skins = {
+                default: { name: 'Morcego Clássico', price: 0, color: '#1a0a0a', eyeColor: '#ff0000', rarity: 'comum' },
+                vampire: { name: 'Vampiro', price: 50, color: '#4a0000', eyeColor: '#ffff00', rarity: 'comum' },
+                ghost: { name: 'Fantasma', price: 100, color: '#333333', eyeColor: '#00ffff', rarity: 'comum' },
+                demon: { name: 'Demônio', price: 150, color: '#8b0000', eyeColor: '#ff6600', rarity: 'incomum' },
+                shadow: { name: 'Sombra', price: 200, color: '#0a0a0a', eyeColor: '#9900ff', rarity: 'incomum' },
+                golden: { name: 'Dourado', price: 300, color: '#ffd700', eyeColor: '#ff0000', rarity: 'raro' },
+                skeleton: { name: 'Esqueleto Alado', price: 1000, color: '#e8e8e8', eyeColor: '#00ff00', rarity: 'lendário', special: true }
+            };
+
+            useEffect(() => {
+                const saved = localStorage.getItem('darkBatData');
+                if (saved) {
+                const data = JSON.parse(saved);
+                setTotalCoins(data.totalCoins || 0);
+                setOwnedSkins(data.ownedSkins || ['default']);
+                setSelectedSkin(data.selectedSkin || 'default');
+                }
+            }, []);
+
+            useEffect(() => {
+                const data = {
+                totalCoins,
+                ownedSkins,
+                selectedSkin
+                };
+                localStorage.setItem('darkBatData', JSON.stringify(data));
+            }, [totalCoins, ownedSkins, selectedSkin]);
+
+            const startGame = () => {
+                setGameStarted(true);
+                setGameOver(false);
+                setBatY(250);
+                setBatVelocity(0);
+                setObstacles([]);
+                setCoins([]);
+                setScore(0);
+                setCollectedCoins(0);
+            };
+
+            const jump = () => {
+                if (gameStarted && !gameOver) {
+                setBatVelocity(JUMP_STRENGTH);
+                }
+            };
+
+            const buySkin = (skinId) => {
+                const skin = skins[skinId];
+                if (totalCoins >= skin.price && !ownedSkins.includes(skinId)) {
+                setTotalCoins(prev => prev - skin.price);
+                setOwnedSkins(prev => [...prev, skinId]);
+                setSelectedSkin(skinId);
+                }
+            };
+
+            const selectSkin = (skinId) => {
+                if (ownedSkins.includes(skinId)) {
+                setSelectedSkin(skinId);
+                }
+            };
+
+            useEffect(() => {
+                const handleKeyPress = (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    if (!gameStarted || gameOver) {
+                    startGame();
+                    } else {
+                    jump();
+                    }
+                }
+                };
+
+                window.addEventListener('keydown', handleKeyPress);
+                return () => window.removeEventListener('keydown', handleKeyPress);
+            }, [gameStarted, gameOver]);
+
+            useEffect(() => {
+                if (!gameStarted || gameOver) return;
+
+                gameLoop.current = setInterval(() => {
+                setBatY(prev => {
+                    const newY = prev + batVelocity;
+                    if (newY < 0 || newY > GAME_HEIGHT - BAT_SIZE) {
+                    setGameOver(true);
+                    setTotalCoins(c => c + collectedCoins);
+                    triggerGlitch();
+                    return prev;
+                    }
+                    return newY;
+                });
+
+                setBatVelocity(prev => prev + GRAVITY);
+
+                setObstacles(prev => {
+                    const updated = prev.map(obs => ({ ...obs, x: obs.x - 3 }))
+                    .filter(obs => obs.x > -OBSTACLE_WIDTH);
+
+                    updated.forEach(obs => {
+                    if (!obs.scored && obs.x + OBSTACLE_WIDTH < GAME_WIDTH / 2 - BAT_SIZE / 2) {
+                        obs.scored = true;
+                        setScore(s => s + 1);
+                    }
+
+                    const batLeft = GAME_WIDTH / 2 - BAT_SIZE / 2 + 8;
+                    const batRight = batLeft + BAT_SIZE - 16;
+                    const batTop = batY + 8;
+                    const batBottom = batY + BAT_SIZE - 8;
+
+                    if (batRight > obs.x + 10 && batLeft < obs.x + OBSTACLE_WIDTH - 10) {
+                        if (batTop < obs.topHeight || batBottom > obs.topHeight + GAP_SIZE) {
+                        setGameOver(true);
+                        setTotalCoins(c => c + collectedCoins);
+                        triggerGlitch();
+                        }
+                    }
+                    });
+
+                    return updated;
+                });
+
+                setCoins(prev => {
+                    const updated = prev.map(coin => ({ ...coin, x: coin.x - 3 }))
+                    .filter(coin => coin.x > -30);
+
+                    updated.forEach(coin => {
+                    if (!coin.collected) {
+                        const batLeft = GAME_WIDTH / 2 - BAT_SIZE / 2;
+                        const batRight = batLeft + BAT_SIZE;
+                        const batTop = batY;
+                        const batBottom = batY + BAT_SIZE;
+
+                        if (batRight > coin.x && batLeft < coin.x + 30 &&
+                            batBottom > coin.y && batTop < coin.y + 30) {
+                        coin.collected = true;
+                        setCollectedCoins(c => c + 1);
+                        }
+                    }
+                    });
+
+                    return updated;
+                });
+                }, 1000 / 60);
+
+                return () => clearInterval(gameLoop.current);
+            }, [gameStarted, gameOver, batY, batVelocity, collectedCoins]);
+
+            useEffect(() => {
+                if (!gameStarted || gameOver) return;
+
+                obstacleTimer.current = setInterval(() => {
+                const topHeight = Math.random() * (GAME_HEIGHT - GAP_SIZE - 100) + 50;
+                setObstacles(prev => [...prev, {
+                    x: GAME_WIDTH,
+                    topHeight,
+                    scored: false,
+                    id: Date.now()
+                }]);
+                }, 2000);
+
+                return () => clearInterval(obstacleTimer.current);
+            }, [gameStarted, gameOver]);
+
+            useEffect(() => {
+                if (!gameStarted || gameOver) return;
+
+                coinTimer.current = setInterval(() => {
+                const coinY = Math.random() * (GAME_HEIGHT - 100) + 50;
+                setCoins(prev => [...prev, {
+                    x: GAME_WIDTH,
+                    y: coinY,
+                    collected: false,
+                    id: Date.now() + Math.random()
+                }]);
+                }, 1500);
+
+                return () => clearInterval(coinTimer.current);
+            }, [gameStarted, gameOver]);
+
+            const triggerGlitch = () => {
+                setGlitchEffect(true);
+                setTimeout(() => setGlitchEffect(false), 300);
+            };
+
+            const BatSVG = ({ skin }) => {
+                const skinData = skins[skin];
+                
+                if (skin === 'skeleton') {
+                return (
+                    <svg viewBox="0 0 100 100" className={`w-full h-full ${gameStarted && !gameOver ? 'animate-pulse' : ''}`}>
+                    <g opacity="0.9">
+                        <path d="M 38 50 L 25 45 L 15 50 L 10 60 L 15 55 L 25 52 L 38 55" 
+                            fill="none" stroke="#e8e8e8" strokeWidth="3"/>
+                        <line x1="38" y1="50" x2="20" y2="48" stroke="#e8e8e8" strokeWidth="2"/>
+                        <line x1="38" y1="53" x2="22" y2="54" stroke="#e8e8e8" strokeWidth="2"/>
+                        
+                        <path d="M 62 50 L 75 45 L 85 50 L 90 60 L 85 55 L 75 52 L 62 55" 
+                            fill="none" stroke="#e8e8e8" strokeWidth="3"/>
+                        <line x1="62" y1="50" x2="80" y2="48" stroke="#e8e8e8" strokeWidth="2"/>
+                        <line x1="62" y1="53" x2="78" y2="54" stroke="#e8e8e8" strokeWidth="2"/>
+                    </g>
+                    
+                    <line x1="50" y1="45" x2="50" y2="70" stroke="#d0d0d0" strokeWidth="3"/>
+                    <circle cx="50" cy="47" r="2" fill="#c0c0c0"/>
+                    <circle cx="50" cy="52" r="2" fill="#c0c0c0"/>
+                    <circle cx="50" cy="57" r="2" fill="#c0c0c0"/>
+                    <circle cx="50" cy="62" r="2" fill="#c0c0c0"/>
+                    <circle cx="50" cy="67" r="2" fill="#c0c0c0"/>
+                    
+                    <path d="M 50 50 Q 42 52 40 55" fill="none" stroke="#d0d0d0" strokeWidth="2"/>
+                    <path d="M 50 50 Q 58 52 60 55" fill="none" stroke="#d0d0d0" strokeWidth="2"/>
+                    <path d="M 50 56 Q 43 58 41 61" fill="none" stroke="#d0d0d0" strokeWidth="2"/>
+                    <path d="M 50 56 Q 57 58 59 61" fill="none" stroke="#d0d0d0" strokeWidth="2"/>
+                    
+                    <ellipse cx="50" cy="35" rx="13" ry="15" fill="#f0f0f0" stroke="#a0a0a0" strokeWidth="2"/>
+                    
+                    <path d="M 40 40 Q 50 45 60 40" fill="none" stroke="#a0a0a0" strokeWidth="2"/>
+                    <line x1="45" y1="41" x2="45" y2="43" stroke="#a0a0a0" strokeWidth="1"/>
+                    <line x1="50" y1="42" x2="50" y2="44" stroke="#a0a0a0" strokeWidth="1"/>
+                    <line x1="55" y1="41" x2="55" y2="43" stroke="#a0a0a0" strokeWidth="1"/>
+                    
+                    <ellipse cx="44" cy="32" rx="4" ry="5" fill="#000000" stroke="#a0a0a0" strokeWidth="1"/>
+                    <ellipse cx="56" cy="32" rx="4" ry="5" fill="#000000" stroke="#a0a0a0" strokeWidth="1"/>
+                    
+                    <circle cx="44" cy="32" r="2" fill={skinData.eyeColor} className="animate-pulse">
+                        <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
+                    </circle>
+                    <circle cx="56" cy="32" r="2" fill={skinData.eyeColor} className="animate-pulse">
+                        <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
+                    </circle>
+                    
+                    <path d="M 48 36 L 50 38 L 52 36" fill="none" stroke="#a0a0a0" strokeWidth="1.5"/>
+                    
+                    <circle cx="50" cy="35" r="20" fill="none" stroke="#00ff00" strokeWidth="1" opacity="0.3">
+                        <animate attributeName="r" values="20;25;20" dur="2s" repeatCount="indefinite"/>
+                        <animate attributeName="opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite"/>
+                    </circle>
+                    </svg>
+                );
+                }
+                
+                return (
+                <svg viewBox="0 0 100 100" className={`w-full h-full ${gameStarted && !gameOver ? 'animate-pulse' : ''}`}>
+                    <ellipse cx="50" cy="55" rx="12" ry="18" fill={skinData.color} stroke="#8b0000" strokeWidth="2"/>
+                    <circle cx="50" cy="35" r="15" fill={skinData.color} stroke="#8b0000" strokeWidth="2"/>
+                    <path d="M 40 25 L 35 15 L 42 28" fill={skinData.color} stroke="#8b0000" strokeWidth="2"/>
+                    <path d="M 60 25 L 65 15 L 58 28" fill={skinData.color} stroke="#8b0000" strokeWidth="2"/>
+                    <circle cx="44" cy="33" r="3" fill={skinData.eyeColor} className="animate-pulse"/>
+                    <circle cx="56" cy="33" r="3" fill={skinData.eyeColor} className="animate-pulse"/>
+                    <path d="M 38 50 Q 15 40 10 60 Q 15 50 38 55" fill={skinData.color} stroke="#8b0000" strokeWidth="2" opacity="0.9"/>
+                    <path d="M 62 50 Q 85 40 90 60 Q 85 50 62 55" fill={skinData.color} stroke="#8b0000" strokeWidth="2" opacity="0.9"/>
+                    <path d="M 38 52 L 20 50" stroke={skinData.eyeColor} strokeWidth="1" opacity="0.5"/>
+                    <path d="M 62 52 L 80 50" stroke={skinData.eyeColor} strokeWidth="1" opacity="0.5"/>
+                </svg>
+                );
+            };
+
+            if (showShop) {
+                return (
+                <div className="flex items-center justify-center min-h-screen bg-black p-4">
+                    <div className="bg-gradient-to-b from-gray-900 to-black border-4 border-red-900 rounded-lg p-8 max-w-2xl w-full" style={{
+                    boxShadow: '0 0 50px rgba(139, 0, 0, 0.5)'
+                    }}>
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-4xl font-bold text-red-600" style={{
+                        textShadow: '0 0 20px #ff0000'
+                        }}>LOJA DE SKINS</h2>
+                        <button
+                        onClick={() => setShowShop(false)}
+                        className="px-4 py-2 bg-red-900 text-white rounded border-2 border-red-600 hover:bg-red-800"
+                        >
+                        VOLTAR
+                        </button>
+                    </div>
+
+                    <div className="bg-black bg-opacity-50 rounded p-4 mb-6 border-2 border-red-800">
+                        <div className="flex items-center justify-center gap-2 text-2xl">
+                        <span className="text-yellow-400">💰</span>
+                        <span className="text-yellow-400 font-bold">{totalCoins}</span>
+                        <span className="text-gray-400">moedas</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(skins).map(([skinId, skinData]) => {
+                        const owned = ownedSkins.includes(skinId);
+                        const selected = selectedSkin === skinId;
+                        const isLegendary = skinData.rarity === 'lendário';
+                        
+                        return (
+                            <div
+                            key={skinId}
+                            className={`bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg p-4 border-2 ${
+                                selected ? 'border-green-500' : 
+                                isLegendary ? 'border-purple-500' : 'border-red-800'
+                            } ${isLegendary ? 'relative overflow-hidden' : ''}`}
+                            >
+                            {isLegendary && (
+                                <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 opacity-20 animate-pulse"></div>
+                            )}
+                            
+                            <div className="relative">
+                                {isLegendary && (
+                                <div className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-full border-2 border-yellow-400 animate-pulse">
+                                    ⭐ LENDÁRIO
+                                </div>
+                                )}
+                                
+                                <div className="w-20 h-20 mx-auto mb-3">
+                                <BatSVG skin={skinId} />
+                                </div>
+                                <h3 className={`text-center font-bold mb-2 ${
+                                isLegendary ? 'text-purple-300' : 'text-white'
+                                }`}>{skinData.name}</h3>
+                                
+                                {owned ? (
+                                selected ? (
+                                    <div className="bg-green-600 text-white py-2 px-4 rounded text-center font-bold">
+                                    ✓ EQUIPADO
+                                    </div>
+                                ) : (
+                                    <button
+                                    onClick={() => selectSkin(skinId)}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded font-bold"
+                                    >
+                                    EQUIPAR
+                                    </button>
+                                )
+                                ) : (
+                                <button
+                                    onClick={() => buySkin(skinId)}
+                                    disabled={totalCoins < skinData.price}
+                                    className={`w-full py-2 px-4 rounded font-bold ${
+                                    totalCoins >= skinData.price
+                                        ? isLegendary 
+                                        ? 'bg-purple-600 hover:bg-purple-700 text-white border-2 border-yellow-400'
+                                        : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                        : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                >
+                                    💰 {skinData.price}
+                                </button>
+                                )}
+                            </div>
+                            </div>
+                        );
+                        })}
+                    </div>
+                    </div>
+                </div>
+                );
+            }
+
+            return (
+                <div className="flex items-center justify-center min-h-screen bg-black p-4">
+                <div className="relative">
+                    <div 
+                    className={`relative overflow-hidden border-4 border-red-900 rounded-lg ${glitchEffect ? 'animate-pulse' : ''}`}
+                    style={{ 
+                        width: GAME_WIDTH, 
+                        height: GAME_HEIGHT,
+                        background: 'linear-gradient(180deg, #0a0a0a 0%, #1a0a0a 50%, #0a0000 100%)',
+                        boxShadow: '0 0 50px rgba(139, 0, 0, 0.5), inset 0 0 50px rgba(0, 0, 0, 0.8)'
+                    }}
+                    onClick={gameStarted && !gameOver ? jump : null}
+                    >
+                    <div className="absolute inset-0 opacity-30 pointer-events-none">
+                        <div className="absolute w-full h-full bg-gradient-radial from-transparent via-gray-900 to-transparent animate-pulse"></div>
+                    </div>
+
+                    <div className="absolute top-4 left-4 right-4 flex justify-between items-start z-10">
+                        <div className="bg-black bg-opacity-70 rounded-lg px-3 py-2 border-2 border-red-800">
+                        <div className="text-yellow-400 font-bold text-xl flex items-center gap-2">
+                            💰 {gameStarted ? collectedCoins : totalCoins}
+                        </div>
+                        </div>
+                        <div className="bg-black bg-opacity-70 rounded-lg px-4 py-2 border-2 border-red-800">
+                        <div className="text-red-500 font-bold text-2xl">{score}</div>
+                        </div>
+                    </div>
+
+                    {obstacles.map(obs => (
+                        <React.Fragment key={obs.id}>
+                        <div
+                            className="absolute"
+                            style={{
+                            left: obs.x,
+                            top: 0,
+                            width: OBSTACLE_WIDTH,
+                            height: obs.topHeight,
+                            background: 'linear-gradient(to bottom, #2a0a0a, #4a1a1a)',
+                            clipPath: 'polygon(50% 100%, 0 0, 100% 0)',
+                            boxShadow: 'inset 0 0 20px rgba(0, 0, 0, 0.8)',
+                            borderLeft: '2px solid #1a0000',
+                            borderRight: '2px solid #1a0000'
+                            }}
+                        >
+                            <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-2 h-8 bg-red-900 opacity-50"></div>
+                        </div>
+
+                        <div
+                            className="absolute"
+                            style={{
+                            left: obs.x,
+                            bottom: 0,
+                            width: OBSTACLE_WIDTH,
+                            height: GAME_HEIGHT - obs.topHeight - GAP_SIZE,
+                            background: 'linear-gradient(to top, #2a0a0a, #4a1a1a)',
+                            clipPath: 'polygon(50% 0, 0 100%, 100% 100%)',
+                            boxShadow: 'inset 0 0 20px rgba(0, 0, 0, 0.8)',
+                            borderLeft: '2px solid #1a0000',
+                            borderRight: '2px solid #1a0000'
+                            }}
+                        >
+                            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-2 h-8 bg-red-900 opacity-50"></div>
+                        </div>
+                        </React.Fragment>
+                    ))}
+
+                    {coins.map(coin => !coin.collected && (
+                        <div
+                        key={coin.id}
+                        className="absolute animate-spin"
+                        style={{
+                            left: coin.x,
+                            top: coin.y,
+                            width: 30,
+                            height: 30
+                        }}
+                        >
+                        <div className="w-full h-full rounded-full bg-gradient-to-br from-yellow-300 via-yellow-500 to-yellow-600 flex items-center justify-center text-xl border-2 border-yellow-400"
+                            style={{
+                            boxShadow: '0 0 15px rgba(255, 215, 0, 0.8)'
+                            }}
+                        >
+                            💰
+                        </div>
+                        </div>
+                    ))}
+
+                    <div
+                        className="absolute transition-transform"
+                        style={{
+                        left: GAME_WIDTH / 2 - BAT_SIZE / 2,
+                        top: batY,
+                        width: BAT_SIZE,
+                        height: BAT_SIZE,
+                        transform: `rotate(${Math.min(Math.max(batVelocity * 3, -30), 30)}deg)`
+                        }}
+                    >
+                        <BatSVG skin={selectedSkin} />
+                    </div>
+
+                    {(!gameStarted || gameOver) && (
+                        <div className={`absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90 ${glitchEffect ? 'animate-pulse' : ''}`}>
+                        <h1 className="text-5xl font-bold text-red-600 mb-4 animate-pulse" style={{
+                            textShadow: '0 0 20px #ff0000, 0 0 40px #8b0000'
+                        }}>
+                            DARK BAT CAVE
+                        </h1>
+                        {gameOver && (
+                            <>
+                            <p className="text-3xl text-red-500 mb-2">VOCÊ MORREU</p>
+                            <p className="text-2xl text-red-400 mb-2">Pontos: {score}</p>
+                            <p className="text-xl text-yellow-400 mb-6">💰 +{collectedCoins} moedas</p>
+                            </>
+                        )}
+                        <div className="flex gap-4 mb-4">
+                            <button
+                            onClick={startGame}
+                            className="px-8 py-4 bg-red-900 text-white text-xl font-bold rounded border-2 border-red-600 hover:bg-red-800 transition-all"
+                            style={{
+                                boxShadow: '0 0 20px rgba(139, 0, 0, 0.5)'
+                            }}
+                            >
+                            {gameOver ? 'JOGAR NOVAMENTE' : 'INICIAR'}
+                            </button>
+                            <button
+                            onClick={() => setShowShop(true)}
+                            className="px-8 py-4 bg-yellow-700 text-white text-xl font-bold rounded border-2 border-yellow-500 hover:bg-yellow-600 transition-all"
+                            style={{
+                                boxShadow: '0 0 20px rgba(255, 215, 0, 0.3)'
+                            }}
+                            >
+                            🛒 LOJA
+                            </button>
+                        </div>
+                        <p className="text-red-400 text-sm">Clique ou pressione ESPAÇO para voar</p>
+                        <div className="mt-4 bg-black bg-opacity-50 rounded px-4 py-2 border border-yellow-600">
+                            <p className="text-yellow-400 text-sm">💰 Total de moedas: {totalCoins}</p>
+                        </div>
+                        </div>
+                    )}
+                    </div>
+                </div>
+                </div>
+            );
+        };
+
+        // Renderização final
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<DarkBatGame />);
+    </script>
+</body>
+</html>
